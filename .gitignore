@@ -1,0 +1,16 @@
+# 环境变量 (包含 API Key)
+.env
+
+# 依赖
+node_modules/
+
+# 会话持久化
+.conversation_store.json
+
+# 日志
+*.log
+npm-debug.log*
+
+# 系统文件
+.DS_Store
+Thumbs.db
