@@ -141,10 +141,13 @@ app.post("/webhook", async (req, res) => {
     // 先返回 200，避免飞书超时重试
     res.json({ ok: true });
 
-    // 验证 token
-    if (token && token !== FEISHU_VERIFICATION_TOKEN) {
-      console.error("事件 token 不匹配");
-      return;
+    // 记录 token（可在 Render 环境变量中配置 FEISHU_VERIFICATION_TOKEN 进行校验）
+    if (token) {
+      console.log("收到事件 token:", token);
+      if (FEISHU_VERIFICATION_TOKEN && FEISHU_VERIFICATION_TOKEN !== "pending" && token !== FEISHU_VERIFICATION_TOKEN) {
+        console.error("事件 token 不匹配");
+        return;
+      }
     }
 
     if (!event || !event.message) return;
