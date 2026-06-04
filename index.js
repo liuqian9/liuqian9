@@ -129,16 +129,17 @@ app.get("/webhook", (req, res) => {
 // 飞书事件订阅 - 接收事件
 // ============================================================
 app.post("/webhook", async (req, res) => {
-  // 先返回 200，避免飞书超时重试
-  res.json({ ok: true });
-
   try {
     const { challenge, token, type, event } = req.body || {};
 
-    // URL 验证 (POST 方式)
+    // URL 验证 (POST 方式) — 必须在任何其他响应之前处理
     if (type === "url_verification" && challenge) {
-      return;
+      console.log("URL 验证成功, 返回 challenge");
+      return res.json({ challenge });
     }
+
+    // 先返回 200，避免飞书超时重试
+    res.json({ ok: true });
 
     // 验证 token
     if (token && token !== FEISHU_VERIFICATION_TOKEN) {
