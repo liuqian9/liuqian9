@@ -239,6 +239,205 @@ function extractText(content) {
 }
 
 // ============================================================
+// 飞书日历集成 —— 真实数据查询
+// ============================================================
+const WEEKDAY_MAP = {
+  "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 0, "天": 0,
+  "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6,
+};
+
+function beijingNow() {
+  const d = new Date();
+  // 转为北京时间
+  const bj = new Date(d.getTime() + (8 * 60 - d.getTimezoneOffset()) * 60000);
+  const day = bj.getDay(); // 0=Sun
+  const monday = new Date(bj);
+  monday.setDate(bj.getDate() - (day === 0 ? 6 : day - 1));
+  return {
+    year: bj.getFullYear(),
+    month: bj.getMonth() + 1,
+    date: bj.getDate(),
+    day,
+    monday,
+  };
+}
+
+function beijingISO(year, month, day, hour = 0, minute = 0) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:00+08:00`;
+}
+
+function isCalendarQuery(text) {
+  if (!text) return false;
+  const kw = ["日程", "日历", "会议", "安排", "行程", "时间表"];
+  return kw.some((w) => text.includes(w));
+}
+
+function parseDateRange(text) {
+  if (!text) return null;
+  const bj = beijingNow();
+
+  // 1. YYYY年M月D日
+  let m = text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/);
+  if (m) {
+    const label = `${m[1]}年${m[2]}月${m[3]}日`;
+    return { start: beijingISO(+m[1], +m[2], +m[3], 0, 0), end: beijingISO(+m[1], +m[2], +m[3], 23, 59), label };
+  }
+
+  // 2. M月D日/号
+  m = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/);
+  if (m) {
+    const label = `${m[1]}月${m[2]}日`;
+    return { start: beijingISO(bj.year, +m[1], +m[2], 0, 0), end: beijingISO(bj.year, +m[1], +m[2], 23, 59), label };
+  }
+
+  // 3. M/D or M-D
+  m = text.match(/(\d{1,2})[\/\-](\d{1,2})/);
+  if (m) {
+    const label = `${m[1]}月${m[2]}日`;
+    return { start: beijingISO(bj.year, +m[1], +m[2], 0, 0), end: beijingISO(bj.year, +m[1], +m[2], 23, 59), label };
+  }
+
+  // 4. 后天
+  if (/后天/.test(text)) {
+    const d = new Date(bj.monday);
+    d.setDate(bj.date + 2);
+    const label = `后天 (${d.getMonth() + 1}月${d.getDate()}日)`;
+    return { start: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0), end: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 23, 59), label };
+  }
+
+  // 5. 明天
+  if (/明天/.test(text)) {
+    const d = new Date(bj.monday);
+    d.setDate(bj.date + 1);
+    const label = `明天 (${d.getMonth() + 1}月${d.getDate()}日)`;
+    return { start: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0), end: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 23, 59), label };
+  }
+
+  // 6. 今天
+  if (/今天/.test(text)) {
+    const label = `今天 (${bj.month}月${bj.date}日)`;
+    return { start: beijingISO(bj.year, bj.month, bj.date, 0, 0), end: beijingISO(bj.year, bj.month, bj.date, 23, 59), label };
+  }
+
+  // 7. 下周X
+  m = text.match(/下[周星期]\s*([一二三四五六日天1-6])/);
+  if (m) {
+    const wd = WEEKDAY_MAP[m[1]];
+    const d = new Date(bj.monday);
+    d.setDate(bj.monday.getDate() + 7 + wd);
+    const label = `下周${m[1]} (${d.getMonth() + 1}月${d.getDate()}日)`;
+    return { start: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0), end: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 23, 59), label };
+  }
+
+  // 8. 本周X / 周X
+  m = text.match(/[本这]?[周星期]\s*([一二三四五六日天1-6])/);
+  if (m) {
+    const wd = WEEKDAY_MAP[m[1]];
+    const d = new Date(bj.monday);
+    d.setDate(bj.monday.getDate() + wd);
+    const label = `周${m[1]} (${d.getMonth() + 1}月${d.getDate()}日)`;
+    return { start: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0), end: beijingISO(d.getFullYear(), d.getMonth() + 1, d.getDate(), 23, 59), label };
+  }
+
+  // 9. 下周（整周范围）
+  if (/下周/.test(text)) {
+    const startD = new Date(bj.monday);
+    startD.setDate(bj.monday.getDate() + 7);
+    const endD = new Date(startD);
+    endD.setDate(startD.getDate() + 6);
+    const label = `下周 (${startD.getMonth() + 1}/${startD.getDate()}-${endD.getMonth() + 1}/${endD.getDate()})`;
+    return { start: beijingISO(startD.getFullYear(), startD.getMonth() + 1, startD.getDate(), 0, 0), end: beijingISO(endD.getFullYear(), endD.getMonth() + 1, endD.getDate(), 23, 59), label };
+  }
+
+  // 10. 本周/这周（整周范围）
+  if (/[本这]周/.test(text)) {
+    const startD = new Date(bj.monday);
+    const endD = new Date(bj.monday);
+    endD.setDate(bj.monday.getDate() + 6);
+    const label = `本周 (${startD.getMonth() + 1}/${startD.getDate()}-${endD.getMonth() + 1}/${endD.getDate()})`;
+    return { start: beijingISO(startD.getFullYear(), startD.getMonth() + 1, startD.getDate(), 0, 0), end: beijingISO(endD.getFullYear(), endD.getMonth() + 1, endD.getDate(), 23, 59), label };
+  }
+
+  // 默认：今天
+  const label = `今天 (${bj.month}月${bj.date}日)`;
+  return { start: beijingISO(bj.year, bj.month, bj.date, 0, 0), end: beijingISO(bj.year, bj.month, bj.date, 23, 59), label };
+}
+
+async function queryFeishuCalendar(openId, startTime, endTime) {
+  try {
+    const token = await getTenantAccessToken();
+    const { data } = await axios.get(
+      "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          user_id_type: "open_id",
+          user_id: openId,
+          start_time: startTime,
+          end_time: endTime,
+          page_size: 50,
+        },
+        timeout: 10000,
+      }
+    );
+    if (data.code !== 0) {
+      logError("日历API错误:", data.code, data.msg);
+      return null;
+    }
+    return (data.data?.items || []).map((ev) => ({
+      summary: ev.summary || ev.subject || "(无标题)",
+      startTime: ev.start_time?.date_time || ev.start_time?.date || "",
+      endTime: ev.end_time?.date_time || ev.end_time?.date || "",
+      location: ev.location?.name || ev.location || "",
+      description: (ev.description || "").slice(0, 200),
+    }));
+  } catch (err) {
+    logError("日历API请求失败:", err.message);
+    return null;
+  }
+}
+
+function formatCalendarContext(events, dateLabel) {
+  const header = `[飞书日历数据 - 以下为真实查询结果]\n查询时间范围: ${dateLabel}`;
+  if (!events || events.length === 0) {
+    return `${header}\n该时间段内没有日程安排。`;
+  }
+  const lines = events.map((ev, i) => {
+    const time = ev.startTime ? formatEventTime(ev.startTime, ev.endTime) : "全天";
+    let line = `${i + 1}. ${time}  ${ev.summary}`;
+    if (ev.location) line += `\n   地点: ${ev.location}`;
+    return line;
+  });
+  return `${header}\n共 ${events.length} 个日程:\n\n${lines.join("\n\n")}`;
+}
+
+function formatEventTime(start, end) {
+  const toTime = (s) => {
+    const m = s.match(/T(\d{2}):(\d{2})/);
+    return m ? `${m[1]}:${m[2]}` : null;
+  };
+  const st = toTime(start);
+  const et = toTime(end);
+  if (st && et) return `${st}-${et}`;
+  if (st) return st;
+  return "";
+}
+
+async function getCalendarContext(userText, openId) {
+  if (!isCalendarQuery(userText) || !openId) return null;
+  const range = parseDateRange(userText);
+  if (!range) return null;
+  log("日历查询:", range.label, "| open_id:", openId.slice(0, 10) + "...");
+  const events = await queryFeishuCalendar(openId, range.start, range.end);
+  if (events === null) {
+    // API 失败 → 让 AI 告知用户暂时无法查询
+    return "[飞书日历数据]\n日历接口暂时无法访问（可能是权限未开通或网络问题）。请告知用户稍后重试或联系管理员开通 calendar 权限。";
+  }
+  return formatCalendarContext(events, range.label);
+}
+
+// ============================================================
 // System Prompt —— 动态时间 + 近期上下文串联策略
 // ============================================================
 function buildSystemPrompt() {
@@ -258,23 +457,24 @@ function buildSystemPrompt() {
     "你是 CLIBOT，刘倩的 AI 助手，通过飞书文字消息交流。",
     "",
     "## ⛔ 绝对禁止 —— 违反即失败",
-    "你是一个纯文本对话模型。你没有任何接口或权限访问以下系统：",
-    "- 飞书（ Lark）—— 日历、日程、会议、消息记录、文档、审批、考勤等",
+    "你没有任何接口或权限访问以下：",
+    "- 飞书文档、审批、考勤、消息记录",
     "- 任何数据库、API、外部系统",
-    "- 刘倩的真实工作数据",
     "",
-    "因此以下行为绝对禁止，一次都不行：",
-    "❌ 编造会议时间、地点、参会人、会议内容",
-    "❌ 编造日程安排（如「你周一上午9点有个会」）",
-    "❌ 编造文档内容（如「你有一份关于XX的报告」）",
-    "❌ 编造任何人发给你的消息或邮件",
+    "以下行为绝对禁止：",
+    "❌ 编造文档内容、审批状态、考勤数据",
+    "❌ 编造任何人发给用户的消息",
     "❌ 编造任何看起来像「真实数据」的信息",
-    "❌ 猜测刘倩的工作安排、会议内容、项目进展",
+    "❌ 猜测刘倩的工作内容、项目进展",
     "",
-    "✅ 正确做法：被问到这类问题时，一句话说清楚即可。",
-    "例如：「这个我查不到真实数据哦，你可以用 Claude Code 来查飞书日历。」",
-    "然后可以基于常识给出通用建议（比如怎么高效开会），但要明确标注这只是通用建议，不是你查到的。",
-    "如果用户问的不是飞书数据，而是知识/建议/写作/分析/代码类问题，正常回答。",
+    "## ✅ 日历数据 —— 可用",
+    "当用户询问日程/会议/安排时，用户消息中可能会附带以 [飞书日历数据] 开头的数据块。",
+    "这些数据是系统实时从飞书日历查询的，真实可信。",
+    "- 基于这些数据回答用户，按时间顺序列出日程",
+    "- 如果数据显示「该时间段内没有日程安排」，如实告知",
+    "- 如果消息中没有 [飞书日历数据] 但用户问日历相关，告知「暂时无法查询日历，请稍后再试」",
+    "- 绝对不要在 [飞书日历数据] 之外编造任何日程信息",
+    "- 如果用户问的不是飞书数据，而是知识/建议/写作/分析/代码，正常回答",
     "",
     "## 对话上下文",
     "每条历史消息前有 [X分钟前] 时间标签。",
@@ -481,6 +681,16 @@ app.post("/webhook", async (req, res) => {
         `📊 当前对话: ${cnt} 条 | 活跃聊天: ${conversationStore.size} 个\n上下文窗口: 最近 ${RECENT_MINUTES} 分钟 | token 上限: ${MAX_HISTORY_TOKENS}`
       );
       return;
+    }
+
+    // 日历集成：检测日程查询，从飞书获取真实数据
+    const senderOpenId = sender?.sender_id?.open_id;
+    if (senderOpenId) {
+      const ctx = await getCalendarContext(userText, senderOpenId);
+      if (ctx) {
+        userText = ctx + "\n\n---\n用户问题: " + userText;
+        log(`[${reqId}] 日历数据已注入`);
+      }
     }
 
     // 取历史（自动标注时间 + 过滤久远消息）
