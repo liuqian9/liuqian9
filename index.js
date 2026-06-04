@@ -84,7 +84,9 @@ async function callAI(userMessage) {
       timeout: 60000,
     }
   );
-  return data.content[0].text;
+  // DeepSeek v4-pro 返回 thinking + text；找到 text 类型的内容
+  const textBlock = data.content.find(c => c.type === "text");
+  return textBlock ? textBlock.text : (data.content[0].text || "");
 }
 
 // ============================================================
