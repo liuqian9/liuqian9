@@ -79,7 +79,7 @@ async function callAI(userMessage) {
     {
       headers: {
         Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
       },
       timeout: 60000,
     }
@@ -185,7 +185,7 @@ app.post("/webhook", async (req, res) => {
     await sendFeishuMessage(targetChat, reply);
     console.log("已回复:", reply.slice(0, 200));
   } catch (err) {
-    console.error("处理消息出错:", err.message);
+    console.error("处理消息出错:", err.message, err.response?.data ? JSON.stringify(err.response.data) : "");
   }
 });
 
