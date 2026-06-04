@@ -117,11 +117,7 @@ app.get("/webhook", (req, res) => {
   const { token, challenge, type } = req.query;
   console.log("URL 验证请求:", { token, type });
 
-  if (token !== FEISHU_VERIFICATION_TOKEN) {
-    console.error("Verification Token 不匹配");
-    return res.status(403).json({ error: "token mismatch" });
-  }
-
+  // URL 验证不需要检查 token（token 用于事件通知，非 URL 验证）
   if (type === "url_verification") {
     return res.json({ challenge });
   }
