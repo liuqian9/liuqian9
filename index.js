@@ -564,10 +564,11 @@ async function callAI(userMessage, history = []) {
 }
 
 // ============================================================
-// 发送消息（长文本自动拆分）
+// 发送消息（长文本自动拆分 + 支持回复指定消息）
 // ============================================================
 const MAX_MSG_LENGTH = 3800;
 
+// 发送新消息（用于 /clear /status 等系统命令）
 async function sendFeishuMessage(chatId, text) {
   const token = await getTenantAccessToken();
   const chunks = splitText(text, MAX_MSG_LENGTH);
@@ -585,6 +586,35 @@ async function sendFeishuMessage(chatId, text) {
       },
       params: { receive_id_type: "chat_id" },
     });
+    if (chunks.length > 1 && i < chunks.length - 1) await sleep(300);
+  }
+}
+
+// 回复指定消息（挂载在用户消息下方，带问题引用）
+async function sendFeishuReply(messageId, text, originalQuestion) {
+  const token = await getTenantAccessToken();
+  // 截取原始问题作为引用（最多60字）
+  const quote = originalQuestion.replace(/\n/g, " ").slice(0, 60);
+  const prefix = originalQuestion ? `↳「${quote}${originalQuestion.length > 60 ? "..." : ""}」\n` : "";
+  const fullText = prefix + text;
+
+  const chunks = splitText(fullText, MAX_MSG_LENGTH);
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkPrefix = chunks.length > 1 ? `(${i + 1}/${chunks.length})\n` : "";
+    const body = {
+      content: JSON.stringify({ text: chunkPrefix + chunks[i] }),
+      msg_type: "text",
+    };
+    await axios.post(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}/reply`,
+      body,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
     if (chunks.length > 1 && i < chunks.length - 1) await sleep(300);
   }
 }
@@ -665,6 +695,8 @@ app.post("/webhook", async (req, res) => {
     log(`[${reqId}] chat:${chatId} type:${msgType} msg:"${userText.slice(0, 120)}"`);
 
     const targetChat = FEISHU_BOT_CHAT_ID || chatId;
+    // 保存原始问题，供回复引用
+    const originalQuestion = userText;
 
     // 命令
     const cmd = userText.trim();
@@ -711,7 +743,8 @@ app.post("/webhook", async (req, res) => {
     addHistory(chatId, "user", userText);
     addHistory(chatId, "assistant", reply);
 
-    await sendFeishuMessage(targetChat, reply);
+    // 回复到用户原始消息下方（带引用），不再是独立新消息
+    await sendFeishuReply(messageId, reply, originalQuestion);
     log(`[${reqId}] 已回复 | ${reply.length}字 | ${Math.ceil(reply.length / MAX_MSG_LENGTH)}条`);
   } catch (err) {
     logError(`[${reqId}] 异常:`, err.message);
