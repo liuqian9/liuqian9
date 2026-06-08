@@ -364,27 +364,24 @@ function parseDateRange(text) {
   return { start: beijingISO(bj.year, bj.month, bj.date, 0, 0), end: beijingISO(bj.year, bj.month, bj.date, 23, 59), label };
 }
 
-async function queryFeishuCalendar(openId, startTime, endTime) {
+async function queryFeishuCalendar(startTime, endTime) {
   try {
     const token = await getTenantAccessToken();
-    // 飞书日历 API 需要 Unix 时间戳（秒）
-    // 用 Date.UTC 直接从 ISO 字符串提取日期组件，避免不同环境的 Date 解析差异
+    // 用 Date.UTC 直接计算 Unix 时间戳（秒），北京时间 UTC+8
     const toTimestamp = (isoStr) => {
       const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-      if (!m) return "0";
-      // 北京时间 (UTC+8) → UTC：减去 8 小时
-      return String(Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], 0) / 1000));
+      if (!m) return 0;
+      return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], 0) / 1000);
     };
     const startTs = toTimestamp(startTime);
     const endTs = toTimestamp(endTime);
-    log("日历查询时间戳:", startTs, "~", endTs);
+    log("日历查询:", startTime, "→ ts:", startTs);
+    // 关键：不带 user_id_type/user_id，page_size 至少 10
     const { data } = await axios.get(
       "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
       {
         headers: { Authorization: `Bearer ${token}` },
         params: {
-          user_id_type: "open_id",
-          user_id: openId,
           start_time: startTs,
           end_time: endTs,
           page_size: 50,
@@ -440,7 +437,7 @@ async function getCalendarContext(userText, openId) {
   const range = parseDateRange(userText);
   if (!range) return null;
   log("日历查询:", range.label, "| open_id:", openId.slice(0, 10) + "...");
-  const events = await queryFeishuCalendar(openId, range.start, range.end);
+  const events = await queryFeishuCalendar(range.start, range.end);
   if (events === null) {
     // API 失败 → 让 AI 告知用户暂时无法查询
     return "[飞书日历数据]\n日历接口暂时无法访问（可能是权限未开通或网络问题）。请告知用户稍后重试或联系管理员开通 calendar 权限。";
