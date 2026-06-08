@@ -727,52 +727,46 @@ app.post("/webhook", async (req, res) => {
     }
     if (cmd === "/debug" || cmd === "debug") {
       const diag = [];
-      // 1. 检查 open_id
       const oid = sender?.sender_id?.open_id;
-      diag.push(oid ? `✅ open_id: ${oid.slice(0, 12)}...` : "❌ 缺少 open_id（webhook 未传发送者身份）");
-      // 2. 检查日历模块
-      diag.push(typeof queryFeishuCalendar === "function" ? "✅ 日历模块已加载" : "❌ 日历模块缺失（代码未部署）");
-      // 3. 实际测试日历 API，并显示详细错误
+      diag.push(oid ? `✅ open_id: ${oid.slice(0, 12)}...` : "❌ 缺少 open_id");
+      diag.push(typeof queryFeishuCalendar === "function" ? "✅ 日历模块已加载" : "❌ 日历模块缺失");
+
       if (oid) {
+        const token = await getTenantAccessToken();
         const bj = beijingNow();
-        const testStart = beijingISO(bj.year, bj.month, bj.date, 0, 0);
-        const testEnd = beijingISO(bj.year, bj.month, bj.date, 23, 59);
-        try {
-          const token = await getTenantAccessToken();
-          const toTs = (iso) => {
-            const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-            if (!m) return "0";
-            return String(Math.floor(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4]-8, +m[5], 0) / 1000));
-          };
-          const { data } = await axios.get(
-            "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
-            {
-              headers: { Authorization: `Bearer ${token}` },
-              params: {
-                user_id_type: "open_id",
-                user_id: oid,
-                start_time: toTs(testStart),
-                end_time: toTs(testEnd),
-                page_size: 10,
-              },
-              timeout: 10000,
-            }
-          );
-          if (data.code === 0) {
-            const count = (data.data?.items || []).length;
-            diag.push(`✅ 日历 API 正常，今天有 ${count} 个日程`);
-          } else {
-            diag.push(`❌ 日历 API 返回错误`);
-            diag.push(`   错误码: ${data.code}`);
-            diag.push(`   错误信息: ${data.msg}`);
-          }
-        } catch (err) {
-          diag.push(`❌ 日历 API 请求失败`);
-          diag.push(`   错误: ${err.message}`);
-          if (err.response?.data) {
-            diag.push(`   响应: ${JSON.stringify(err.response.data).slice(0, 200)}`);
-          }
-        }
+        const ts = String(Math.floor(Date.UTC(bj.year, bj.month - 1, bj.date, -8, 0, 0) / 1000));
+        const te = String(Math.floor(Date.UTC(bj.year, bj.month - 1, bj.date, 15, 59, 59) / 1000));
+
+        // 测试1: 列出日历（不带 user_id）
+        const r1 = await axios.get("https://open.feishu.cn/open-apis/calendar/v4/calendars", {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 8000,
+        }).then(r => r.data).catch(e => ({ code: -1, msg: e.message }));
+        diag.push(`测试1-列出日历(无user): code=${r1.code} ${r1.msg||""}${r1.data?.calendar_list ? " 日历数:"+r1.data.calendar_list.length : ""}`);
+
+        // 测试2: 列出日历（带 user_id）
+        const r2 = await axios.get("https://open.feishu.cn/open-apis/calendar/v4/calendars", {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { user_id_type: "open_id", user_id: oid },
+          timeout: 8000,
+        }).then(r => r.data).catch(e => ({ code: -1, msg: e.message }));
+        diag.push(`测试2-列出日历(带user): code=${r2.code} ${r2.msg||""}${r2.data?.calendar_list ? " 日历数:"+r2.data.calendar_list.length : ""}`);
+
+        // 测试3: 查询 primary 事件（不带 user_id）
+        const r3 = await axios.get("https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { start_time: ts, end_time: te, page_size: 5 },
+          timeout: 8000,
+        }).then(r => r.data).catch(e => ({ code: -1, msg: e.message }));
+        diag.push(`测试3-primary事件(无user): code=${r3.code} ${r3.msg||""}${r3.data?.items ? " 事件数:"+r3.data.items.length : ""}`);
+
+        // 测试4: 查询 primary 事件（带 user_id）
+        const r4 = await axios.get("https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { user_id_type: "open_id", user_id: oid, start_time: ts, end_time: te, page_size: 5 },
+          timeout: 8000,
+        }).then(r => r.data).catch(e => ({ code: -1, msg: e.message }));
+        diag.push(`测试4-primary事件(带user): code=${r4.code} ${r4.msg||""}${r4.data?.items ? " 事件数:"+r4.data.items.length : ""}`);
       }
       await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
       return;
