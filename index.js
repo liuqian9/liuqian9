@@ -714,6 +714,28 @@ app.post("/webhook", async (req, res) => {
       );
       return;
     }
+    if (cmd === "/debug" || cmd === "debug") {
+      const diag = [];
+      // 1. 检查 open_id
+      const oid = sender?.sender_id?.open_id;
+      diag.push(oid ? `✅ open_id: ${oid.slice(0, 12)}...` : "❌ 缺少 open_id（webhook 未传发送者身份）");
+      // 2. 检查日历模块
+      diag.push(typeof queryFeishuCalendar === "function" ? "✅ 日历模块已加载" : "❌ 日历模块缺失（代码未部署）");
+      // 3. 实际测试日历 API
+      if (oid) {
+        const bj = beijingNow();
+        const testStart = beijingISO(bj.year, bj.month, bj.date, 0, 0);
+        const testEnd = beijingISO(bj.year, bj.month, bj.date, 23, 59);
+        const events = await queryFeishuCalendar(oid, testStart, testEnd);
+        if (events === null) {
+          diag.push("❌ 日历 API 调用失败（可能是权限未生效或网络问题）");
+        } else {
+          diag.push(`✅ 日历 API 正常，今天有 ${events.length} 个日程`);
+        }
+      }
+      await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
+      return;
+    }
 
     // 日历集成：检测日程查询，从飞书获取真实数据
     const senderOpenId = sender?.sender_id?.open_id;
