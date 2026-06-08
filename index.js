@@ -763,15 +763,17 @@ app.post("/webhook", async (req, res) => {
           validateStatus: () => true,
         }).then(r => r.data).catch(() => ({ code: -1 }));
 
-        diag.push(`应用日历(${appCals.data?.calendar_list?.length||0}个): ${(appCals.data?.calendar_list||[]).map(c=>c.summary||c.calendar_id).join(", ")}`);
-        diag.push(`个人日历(${userCals.data?.calendar_list?.length||0}个): ${(userCals.data?.calendar_list||[]).map(c=>c.summary||c.calendar_id).join(", ")}`);
+        diag.push(`应用日历(${appCals.data?.calendar_list?.length||0}个):`);
+        (appCals.data?.calendar_list||[]).forEach(c => diag.push(`  ID=${c.calendar?.calendar_id||c.calendar_id||"?"} 名=${c.summary||"?"}`));
+        diag.push(`个人日历(${userCals.data?.calendar_list?.length||0}个):`);
+        (userCals.data?.calendar_list||[]).forEach(c => diag.push(`  ID=${c.calendar?.calendar_id||c.calendar_id||"?"} 名=${c.summary||"?"} type=${c.type||"?"}`));
 
         // 用个人日历ID查事件
-        if (userCals.code === 0 && userCals.data?.calendar_list?.length) {
-          const ucalId = userCals.data.calendar_list[0].calendar?.calendar_id;
-          diag.push(await apiTest("个人日历事件", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${encodeURIComponent(ucalId)}/events`, { start_time: parseInt(ts), end_time: parseInt(te) }));
-        } else {
-          diag.push("个人日历-获取失败 code=" + userCals.code);
+        const uCal = userCals.data?.calendar_list?.[0];
+        if (uCal) {
+          const ucalId = uCal.calendar?.calendar_id || uCal.calendar_id;
+          // 不加user_id查
+          diag.push(await apiTest("个人日历事件(无user)", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${encodeURIComponent(ucalId)}/events`, { start_time: parseInt(ts), end_time: parseInt(te) }));
         }
       }
       await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
