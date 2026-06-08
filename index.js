@@ -751,10 +751,23 @@ app.post("/webhook", async (req, res) => {
             return `${label}: 网络错误 ${e.message}`;
           }
         }
-        diag.push(await apiTest("测试1-列出日历(无user)", "https://open.feishu.cn/open-apis/calendar/v4/calendars"));
+        diag.push(`时间戳: ts=${ts} te=${te}`);
+        diag.push(await apiTest("测试1-列出日历", "https://open.feishu.cn/open-apis/calendar/v4/calendars"));
         diag.push(await apiTest("测试2-列出日历(带user)", "https://open.feishu.cn/open-apis/calendar/v4/calendars", { user_id_type: "open_id", user_id: oid }));
-        diag.push(await apiTest("测试3-primary事件(无user)", "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", { start_time: ts, end_time: te, page_size: 5 }));
-        diag.push(await apiTest("测试4-primary事件(带user)", "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", { user_id_type: "open_id", user_id: oid, start_time: ts, end_time: te, page_size: 5 }));
+
+        // 拿到真实日历ID
+        let calId = "primary";
+        const calList = await axios.get("https://open.feishu.cn/open-apis/calendar/v4/calendars", {
+          headers: { Authorization: `Bearer ${token}` },
+          validateStatus: () => true,
+        }).then(r => r.data).catch(() => ({ code: -1 }));
+        if (calList.code === 0 && calList.data?.calendar_list?.length) {
+          calId = calList.data.calendar_list[0].calendar?.calendar_id || "primary";
+          diag.push(`日历: ${calList.data.calendar_list[0].summary || calId}`);
+        }
+
+        diag.push(await apiTest("测试3-primary事件", "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", { start_time: ts, end_time: te, page_size: 5 }));
+        diag.push(await apiTest("测试4-真实日历事件", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${calId}/events`, { start_time: ts, end_time: te, page_size: 5 }));
       }
       await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
       return;
