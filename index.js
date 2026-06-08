@@ -367,8 +367,17 @@ function parseDateRange(text) {
 async function queryFeishuCalendar(openId, startTime, endTime) {
   try {
     const token = await getTenantAccessToken();
-    // 飞书日历 API 需要 Unix 时间戳（秒），不是 ISO 字符串
-    const toTimestamp = (isoStr) => String(Math.floor(new Date(isoStr).getTime() / 1000));
+    // 飞书日历 API 需要 Unix 时间戳（秒）
+    // 用 Date.UTC 直接从 ISO 字符串提取日期组件，避免不同环境的 Date 解析差异
+    const toTimestamp = (isoStr) => {
+      const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (!m) return "0";
+      // 北京时间 (UTC+8) → UTC：减去 8 小时
+      return String(Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], 0) / 1000));
+    };
+    const startTs = toTimestamp(startTime);
+    const endTs = toTimestamp(endTime);
+    log("日历查询时间戳:", startTs, "~", endTs);
     const { data } = await axios.get(
       "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
       {
@@ -376,8 +385,8 @@ async function queryFeishuCalendar(openId, startTime, endTime) {
         params: {
           user_id_type: "open_id",
           user_id: openId,
-          start_time: toTimestamp(startTime),
-          end_time: toTimestamp(endTime),
+          start_time: startTs,
+          end_time: endTs,
           page_size: 50,
         },
         timeout: 10000,
@@ -730,7 +739,11 @@ app.post("/webhook", async (req, res) => {
         const testEnd = beijingISO(bj.year, bj.month, bj.date, 23, 59);
         try {
           const token = await getTenantAccessToken();
-          const toTs = (iso) => String(Math.floor(new Date(iso).getTime() / 1000));
+          const toTs = (iso) => {
+            const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+            if (!m) return "0";
+            return String(Math.floor(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4]-8, +m[5], 0) / 1000));
+          };
           const { data } = await axios.get(
             "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
             {
