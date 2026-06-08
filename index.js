@@ -367,6 +367,8 @@ function parseDateRange(text) {
 async function queryFeishuCalendar(openId, startTime, endTime) {
   try {
     const token = await getTenantAccessToken();
+    // 飞书日历 API 需要 Unix 时间戳（秒），不是 ISO 字符串
+    const toTimestamp = (isoStr) => String(Math.floor(new Date(isoStr).getTime() / 1000));
     const { data } = await axios.get(
       "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
       {
@@ -374,8 +376,8 @@ async function queryFeishuCalendar(openId, startTime, endTime) {
         params: {
           user_id_type: "open_id",
           user_id: openId,
-          start_time: startTime,
-          end_time: endTime,
+          start_time: toTimestamp(startTime),
+          end_time: toTimestamp(endTime),
           page_size: 50,
         },
         timeout: 10000,
@@ -728,6 +730,7 @@ app.post("/webhook", async (req, res) => {
         const testEnd = beijingISO(bj.year, bj.month, bj.date, 23, 59);
         try {
           const token = await getTenantAccessToken();
+          const toTs = (iso) => String(Math.floor(new Date(iso).getTime() / 1000));
           const { data } = await axios.get(
             "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
             {
@@ -735,8 +738,8 @@ app.post("/webhook", async (req, res) => {
               params: {
                 user_id_type: "open_id",
                 user_id: oid,
-                start_time: testStart,
-                end_time: testEnd,
+                start_time: toTs(testStart),
+                end_time: toTs(testEnd),
                 page_size: 10,
               },
               timeout: 10000,
