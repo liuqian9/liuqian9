@@ -753,7 +753,6 @@ app.post("/webhook", async (req, res) => {
         }
         diag.push(`时间戳: ts=${ts} te=${te}`);
         diag.push(await apiTest("测试1-列出日历", "https://open.feishu.cn/open-apis/calendar/v4/calendars"));
-        diag.push(await apiTest("测试2-列出日历(带user)", "https://open.feishu.cn/open-apis/calendar/v4/calendars", { user_id_type: "open_id", user_id: oid }));
 
         // 拿到真实日历ID
         let calId = "primary";
@@ -763,11 +762,15 @@ app.post("/webhook", async (req, res) => {
         }).then(r => r.data).catch(() => ({ code: -1 }));
         if (calList.code === 0 && calList.data?.calendar_list?.length) {
           calId = calList.data.calendar_list[0].calendar?.calendar_id || "primary";
-          diag.push(`日历: ${calList.data.calendar_list[0].summary || calId}`);
+          diag.push(`日历ID: ${calId}`);
+          diag.push(`日历名: ${calList.data.calendar_list[0].summary || "?"}`);
         }
 
-        diag.push(await apiTest("测试3-primary事件", "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events", { start_time: ts, end_time: te, page_size: 5 }));
-        diag.push(await apiTest("测试4-真实日历事件", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${calId}/events`, { start_time: ts, end_time: te, page_size: 5 }));
+        // 尝试不同参数组合
+        diag.push(await apiTest("测试2-仅start/end", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${encodeURIComponent(calId)}/events`, { start_time: ts, end_time: te }));
+        diag.push(await apiTest("测试3-加page_size=10", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${encodeURIComponent(calId)}/events`, { start_time: ts, end_time: te, page_size: "10" }));
+        // 尝试用 number 类型的时间戳
+        diag.push(await apiTest("测试4-时间戳用int", `https://open.feishu.cn/open-apis/calendar/v4/calendars/${encodeURIComponent(calId)}/events`, { start_time: parseInt(ts), end_time: parseInt(te) }));
       }
       await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
       return;
