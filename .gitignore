@@ -10,6 +10,10 @@ node_modules/
 # 日志
 *.log
 npm-debug.log*
+logs/
+
+# PM2
+.pm2/
 
 # 系统文件
 .DS_Store

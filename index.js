@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
+const { exec } = require("child_process");
 
 const app = express();
 app.use(express.json());
@@ -446,6 +447,63 @@ async function getCalendarContext(userText, openId) {
 }
 
 // ============================================================
+// Claude Code 任务调度 —— 在用户本机执行真实工作
+// ============================================================
+const TASK_KEYWORDS = [
+  "帮我", "处理", "分析", "修复", "改", "修改", "写", "生成", "创建",
+  "部署", "推送", "提交", "编译", "测试", "重构", "优化", "检查",
+  "整理", "查", "找", "搜索", "执行", "运行", "配置", "安装",
+  "review", "debug", "fix", "build", "deploy", "test", "run",
+  "提交代码", "发布", "合并", "更新", "升级", "初始化",
+];
+
+function isClaudeTask(text) {
+  if (!text) return false;
+  return TASK_KEYWORDS.some((kw) => text.includes(kw));
+}
+
+function executeClaudeTask(task, chatId, reqId) {
+  return new Promise((resolve) => {
+    // 转义特殊字符防止命令注入
+    const safeTask = task.replace(/"/g, '\\"').replace(/`/g, "\\`").replace(/\$/g, "\\$");
+    const cmd = `claude -p "${safeTask}" --no-sandbox 2>&1`;
+    log(`[${reqId}] 调度 Claude Code: ${task.slice(0, 100)}`);
+
+    const child = exec(cmd, {
+      timeout: 300000, // 5 分钟超时
+      maxBuffer: 100 * 1024 * 1024, // 100MB 输出上限
+      cwd: process.env.HOME || process.env.USERPROFILE || "C:\\Users\\24100006",
+      env: { ...process.env }, // 继承当前环境变量（含 ANTHROPIC_BASE_URL 等）
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (data) => { stdout += data; });
+    child.stderr?.on("data", (data) => { stderr += data; });
+
+    child.on("close", (code) => {
+      const output = (stdout + (stderr ? "\n[stderr]\n" + stderr : "")).trim();
+      log(`[${reqId}] Claude Code 完成, code=${code}, 输出长度=${output.length}`);
+      resolve({
+        success: code === 0,
+        output: output || "(无输出)",
+        exitCode: code,
+      });
+    });
+
+    child.on("error", (err) => {
+      logError(`[${reqId}] Claude Code 启动失败:`, err.message);
+      resolve({
+        success: false,
+        output: `Claude Code 启动失败: ${err.message}。请确认 claude CLI 已安装且在 PATH 中。`,
+        exitCode: -1,
+      });
+    });
+  });
+}
+
+// ============================================================
 // System Prompt —— 动态时间 + 近期上下文串联策略
 // ============================================================
 function buildSystemPrompt() {
@@ -790,6 +848,24 @@ app.post("/webhook", async (req, res) => {
       }
     }
 
+    // ---- 任务分流：检测是否需要用 Claude Code 执行 ----
+    if (isClaudeTask(originalQuestion)) {
+      log(`[${reqId}] 检测到任务关键词，调度 Claude Code`);
+      // 先回复一条确认消息
+      await sendFeishuReply(messageId, `🔄 正在执行：${originalQuestion.slice(0, 50)}...`, originalQuestion);
+      // 执行
+      const result = await executeClaudeTask(originalQuestion, targetChat, reqId);
+      const taskReply = result.success
+        ? `✅ 任务完成\n\n${result.output.slice(0, 8000)}${result.output.length > 8000 ? "\n\n...(输出过长已截断)" : ""}`
+        : `❌ 任务执行失败 (exit=${result.exitCode})\n\n${result.output.slice(0, 4000)}`;
+      addHistory(chatId, "user", originalQuestion);
+      addHistory(chatId, "assistant", taskReply);
+      await sendFeishuReply(messageId, taskReply, originalQuestion);
+      log(`[${reqId}] 任务回复已发送 | ${taskReply.length}字`);
+      return;
+    }
+    // ---- 任务分流结束 ----
+
     // 取历史（自动标注时间 + 过滤久远消息）
     const history = getHistory(chatId);
     log(`[${reqId}] 历史:${history.length}条`);
@@ -799,7 +875,7 @@ app.post("/webhook", async (req, res) => {
       reply = await callAI(userText, history);
     } catch (aiErr) {
       logError(`[${reqId}] AI 失败:`, aiErr.message);
-      await sendFeishuMessage(targetChat, "😅 暂时无法回复，请稍后再试");
+      await sendFeishuReply(messageId, "😅 暂时无法回复，请稍后再试", originalQuestion);
       return;
     }
 
