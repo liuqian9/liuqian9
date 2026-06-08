@@ -7,6 +7,12 @@ const { exec } = require("child_process");
 const app = express();
 app.use(express.json());
 
+// 阻止 localtunnel 在响应中注入广告代码
+app.use((_req, res, next) => {
+  res.setHeader("Bypass-Tunnel-Reminder", "1");
+  next();
+});
+
 // ============================================================
 // 环境变量
 // ============================================================
