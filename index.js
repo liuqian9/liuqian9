@@ -721,16 +721,41 @@ app.post("/webhook", async (req, res) => {
       diag.push(oid ? `✅ open_id: ${oid.slice(0, 12)}...` : "❌ 缺少 open_id（webhook 未传发送者身份）");
       // 2. 检查日历模块
       diag.push(typeof queryFeishuCalendar === "function" ? "✅ 日历模块已加载" : "❌ 日历模块缺失（代码未部署）");
-      // 3. 实际测试日历 API
+      // 3. 实际测试日历 API，并显示详细错误
       if (oid) {
         const bj = beijingNow();
         const testStart = beijingISO(bj.year, bj.month, bj.date, 0, 0);
         const testEnd = beijingISO(bj.year, bj.month, bj.date, 23, 59);
-        const events = await queryFeishuCalendar(oid, testStart, testEnd);
-        if (events === null) {
-          diag.push("❌ 日历 API 调用失败（可能是权限未生效或网络问题）");
-        } else {
-          diag.push(`✅ 日历 API 正常，今天有 ${events.length} 个日程`);
+        try {
+          const token = await getTenantAccessToken();
+          const { data } = await axios.get(
+            "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events",
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              params: {
+                user_id_type: "open_id",
+                user_id: oid,
+                start_time: testStart,
+                end_time: testEnd,
+                page_size: 10,
+              },
+              timeout: 10000,
+            }
+          );
+          if (data.code === 0) {
+            const count = (data.data?.items || []).length;
+            diag.push(`✅ 日历 API 正常，今天有 ${count} 个日程`);
+          } else {
+            diag.push(`❌ 日历 API 返回错误`);
+            diag.push(`   错误码: ${data.code}`);
+            diag.push(`   错误信息: ${data.msg}`);
+          }
+        } catch (err) {
+          diag.push(`❌ 日历 API 请求失败`);
+          diag.push(`   错误: ${err.message}`);
+          if (err.response?.data) {
+            diag.push(`   响应: ${JSON.stringify(err.response.data).slice(0, 200)}`);
+          }
         }
       }
       await sendFeishuMessage(targetChat, `🔍 CLIBOT 诊断\n\n${diag.join("\n")}`);
